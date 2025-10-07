@@ -17,7 +17,7 @@ def log_error(message):
 try:
     # Initialize FastMCP server
     log_error("Initializing FastMCP server...")
-    mcp = FastMCP("espn-fantasy-football", dependancies=['espn-api'])
+    mcp = FastMCP("espn-fantasy-football", dependencies=['espn-api'])
 
     # Constants
     CURRENT_YEAR = datetime.datetime.now().year
