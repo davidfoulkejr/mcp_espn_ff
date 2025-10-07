@@ -175,12 +175,14 @@ try:
             return f"Error retrieving team roster: {str(e)}"
         
     @mcp.tool()
-    async def get_team_info(league_id: int, team_id: int, year: int = CURRENT_YEAR) -> str:
-        """Get a team's general information. Including points scored, transactions, etc.
+    async def get_team_info(league_id: int, team_id: int = None, team_name: str = "", owner: str = "", year: int = CURRENT_YEAR) -> str:
+        """Get a team's general information using its ID, team name, or owner's name. Must include at least one of the three. Return value includes points scored, transactions, etc.
         
         Args:
             league_id: The ESPN fantasy football league ID
-            team_id: The team ID in the league (usually 1-12)
+            team_id: Optional team ID to search for (1-based index, usually 1-12)
+            team_name: Optional team name to search for (case insensitive substring match)
+            owner: Optional owner name to search for (case insensitive substring match)
             year: Optional year for historical data (defaults to current season)
         """
         try:
@@ -188,12 +190,29 @@ try:
             # Get league using stored credentials
             league = api.get_league(SESSION_ID, league_id, year)
 
-            # Team IDs in ESPN API are 1-based
-            if team_id < 1 or team_id > len(league.teams):
-                return f"Invalid team_id. Must be between 1 and {len(league.teams)}"
+            team = None
+            if team_id:
+                # Team IDs in ESPN API are 1-based
+                if team_id < 1 or team_id > len(league.teams):
+                    return f"Invalid team_id. Must be between 1 and {len(league.teams)}"
+                team = league.teams[team_id - 1]
+            elif team_name:
+                for t in league.teams:
+                    if team_name.lower() in t.team_name.lower():
+                        team = t
+                        break
+                if not team:
+                    return f"Team with name containing '{team_name}' not found in league {league_id}"
+            elif owner:
+                for t in league.teams:
+                    if any(owner.lower() in f"{o['firstName']} {o['lastName']} {o['displayName']}".lower() for o in t.owners):
+                        team = t
+                        break
+                if not team:
+                    return f"Team with owner containing '{owner}' not found in league {league_id}"
+            else:
+                return "Invalid input. Please provide either team_id, team_name, or owner to identify the team."
             
-            team = league.teams[team_id - 1]
-
             team_info = {
                 "team_name": team.team_name,
                 "owner": team.owners,
