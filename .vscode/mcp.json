@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "espn-fantasy-football": {
+      "command": "C:\\Users\\dfoulke\\.local\\bin\\uv.exe",
+      "args": [
+        "--directory",
+        "C:/Users/dfoulke/git/mcp_espn_ff",
+        "run",
+        "espn_fantasy_server.py"
+      ]
+    }
+  }
+}

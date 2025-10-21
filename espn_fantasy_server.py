@@ -1,5 +1,6 @@
 from mcp.server.fastmcp import FastMCP
-from espn_api.football import League
+from espn_api.football import League, Team
+import json
 import os
 import sys
 import datetime
@@ -14,6 +15,17 @@ logger = logging.getLogger("espn-fantasy-football")
 def log_error(message):
     print(message, file=sys.stderr)
 
+def get_credentials():
+    try:
+        with open('./.venv/secrets.json', 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        log_error("Error: secrets.json file not found. Please create a secrets.json file in the .venv directory with your ESPN_S2 and SWID cookies in order to authenticate automatically.")
+        return None
+    
+def get_owner_name(team) -> str|None:
+    return f"{team.owners[0]['firstName']} {team.owners[0]['lastName']}" if team.owners else None
+
 try:
     # Initialize FastMCP server
     log_error("Initializing FastMCP server...")
@@ -25,13 +37,25 @@ try:
         CURRENT_YEAR -= 1
 
     log_error(f"Using football year: {CURRENT_YEAR}")
+    
+    # Store a session map
+    SESSION_ID = "default_session"
 
     class ESPNFantasyFootballAPI:
         def __init__(self):
             self.leagues = {}  # Cache for league objects
             # Store credentials separately per-session rather than globally
-            self.credentials = {}
-        
+            secrets = get_credentials()
+            if secrets:
+                self.credentials = {
+                    SESSION_ID: {
+                        'espn_s2': secrets.get('espn_s2'),
+                        'swid': secrets.get('swid')
+                    }
+                }
+            else:
+                self.credentials = {}
+
         def get_league(self, session_id, league_id, year=CURRENT_YEAR):
             """Get a league instance with caching, using stored credentials if available"""
             key = f"{league_id}_{year}"
@@ -49,7 +73,10 @@ try:
             if cache_key not in self.leagues:
                 log_error(f"Creating new league instance for {league_id}, year {year}")
                 try:
-                    self.leagues[cache_key] = League(league_id=league_id, year=year, espn_s2=espn_s2, swid=swid)
+                    league = League(league_id=league_id, year=year, espn_s2=espn_s2, swid=swid)
+                    for team in league.teams:
+                        team.team_name = team.team_name.strip()
+                    self.leagues[cache_key] = league
                 except Exception as e:
                     log_error(f"Error creating league: {str(e)}")
                     raise
@@ -73,12 +100,9 @@ try:
     # Create our API instance
     api = ESPNFantasyFootballAPI()
 
-    # Store a session map
-    SESSION_ID = "default_session"
-
     @mcp.tool()
     async def authenticate(espn_s2: str, swid: str) -> str:
-        """Store ESPN authentication credentials for this session.
+        """Store ESPN authentication credentials for this session. Should be done automatically on server start, but can be done manually if needed.
         
         Args:
             espn_s2: The ESPN_S2 cookie value from your ESPN account
@@ -156,13 +180,19 @@ try:
             }
             
             for player in team.roster:
+                [season_stats_key, current_week_key, next_week_key] = player.stats.keys()
+                season_stats = player.stats[season_stats_key]
+                current_week_stats = player.stats[current_week_key]
+                next_week_stats = player.stats[next_week_key]
                 roster_info["roster"].append({
                     "name": player.name,
                     "position": player.position,
                     "proTeam": player.proTeam,
-                    "points": player.total_points,
-                    "projected_points": player.projected_total_points,
-                    "stats": player.stats
+                    **({"season_total_points": player.total_points} if player.total_points else {}),
+                    **({"projected_season_total_points": player.projected_total_points} if player.projected_total_points else {}),
+                    "season_stats": season_stats,
+                    "current_week_stats": current_week_stats,
+                    "next_week_projected_stats": next_week_stats
                 })
             
             return str(roster_info)
@@ -214,6 +244,7 @@ try:
                 return "Invalid input. Please provide either team_id, team_name, or owner to identify the team."
             
             team_info = {
+                "team_id": team.team_id,
                 "team_name": team.team_name,
                 "owner": team.owners,
                 "wins": team.wins,
@@ -326,8 +357,8 @@ try:
             return f"Error retrieving league standings: {str(e)}"
 
     @mcp.tool()
-    async def get_matchup_info(league_id: int, week: int = None, year: int = CURRENT_YEAR) -> str:
-        """Get matchup information for a specific week.
+    async def get_weekly_matchups(league_id: int, week: int = None, year: int = CURRENT_YEAR) -> str:
+        """Get basic matchup information for all matchups in a specific week, including team names, owners, and scores.
         
         Args:
             league_id: The ESPN fantasy football league ID
@@ -350,9 +381,13 @@ try:
             matchup_info = []
             for matchup in matchups:
                 matchup_info.append({
+                    "home_team_id": matchup.home_team.team_id,
                     "home_team": matchup.home_team.team_name,
+                    "home_team_owner_name": get_owner_name(matchup.home_team),
                     "home_score": matchup.home_score,
+                    "away_team_id": matchup.away_team.team_id if matchup.away_team else None,
                     "away_team": matchup.away_team.team_name if matchup.away_team else "BYE",
+                    "away_team_owner_name": get_owner_name(matchup.away_team) if matchup.away_team else None,
                     "away_score": matchup.away_score if matchup.away_team else 0,
                     "winner": "HOME" if matchup.home_score > matchup.away_score else "AWAY" if matchup.away_score > matchup.home_score else "TIE"
                 })
@@ -365,6 +400,114 @@ try:
                 return ("This appears to be a private league. Please use the authenticate tool first with your "
                       "ESPN_S2 and SWID cookies to access private leagues.")
             return f"Error retrieving matchup information: {str(e)}"
+    
+    @mcp.tool()
+    async def get_detailed_matchup_info(league_id: int, competitors: list, week: int = None, year: int = CURRENT_YEAR) -> str:
+        """Get detailed matchup information for a specific week and list of competitors, including lineup info and player stats.
+
+        Args:
+            league_id: The ESPN fantasy football league ID
+            competitors: List of team names or IDs to filter matchups by (if multiple provided, will include all matchups with at least one of the teams)
+            week: The week number (if None, uses current week)
+            year: Optional year for historical data (defaults to current season)
+        """
+        try:
+            print(f"Getting matchup info for league {league_id}, week {week}, year {year}", file=sys.stderr)
+            # Get league using stored credentials
+            league = api.get_league(SESSION_ID, league_id, year)
+            
+            # Default to previous week if not provided (every Tuesday starts a new week, and I almost always use this on Tuesdays)
+            if week is None:
+                week = league.current_week - 1
+                
+            if week < 1 or week > 17:  # Most leagues have 17 weeks max
+                return f"Invalid week number. Must be between 1 and 17"
+
+            if not competitors:
+                return "No competitors provided. Please provide a list of team IDs to filter matchups by."
+
+            # Filter matchups by competitors
+            def filter_matchups_by_competitors(matchups, competitors) -> list:
+                filtered_matchups = []
+
+                def find_team_matchup(matchup_list, competitor):
+                    is_team_id = isinstance(competitor, int)
+                    found = None
+                    for matchup in matchup_list:
+                        if is_team_id:
+                            if matchup.home_team.team_id == competitor or (matchup.away_team and matchup.away_team.team_id == competitor):
+                                found = matchup
+                                break
+                        else:
+                            if matchup.home_team.team_name.lower() == competitor.lower() or (matchup.away_team and matchup.away_team.team_name.lower() == competitor.lower()):
+                                found = matchup
+                                break
+                    return found
+                
+                for c in competitors:
+                    matchup = find_team_matchup(matchups, c)
+                    if matchup and matchup not in filtered_matchups:
+                        filtered_matchups.append(matchup)
+
+                return filtered_matchups
+
+            matchups = filter_matchups_by_competitors(league.box_scores(week), competitors)
+
+            def resolve_lineup(lineup):
+                roster = []
+                for player in lineup:
+                    stats = {}
+                    stat_keys = player.stats.keys()
+                    # Check if player has stats for this week (if not, they may be on bye)
+                    if len(stat_keys) > 0:
+                        if week == league.current_week:
+                            [season_stats_key, current_week_key, next_week_key] = player.stats.keys()
+                            stats = {
+                                "season_stats": player.stats[season_stats_key],
+                                "weekly_stats": player.stats[current_week_key],
+                                "projected_stats": player.stats[next_week_key]
+                            }
+                        else:
+                            [current_week_key] = player.stats.keys()
+                            stats = {
+                                "weekly_stats": player.stats[current_week_key]
+                            }
+                    roster.append({
+                        "name": player.name,
+                        "position": player.position,
+                        "proTeam": player.proTeam,
+                        **({"season_total_points": player.total_points} if player.total_points else {}),
+                        **({"projected_season_total_points": player.projected_total_points} if player.projected_total_points else {}),
+                        "lineupSlot": player.lineupSlot,
+                        **stats
+                    })
+                return roster
+
+            matchup_info = []
+            for matchup in matchups:
+                matchup_info.append({
+                    "home_team_id": matchup.home_team.team_id,
+                    "home_team": matchup.home_team.team_name,
+                    "home_team_owner_name": get_owner_name(matchup.home_team),
+                    "home_score": matchup.home_score,
+                    "home_lineup": resolve_lineup(matchup.home_lineup),
+                    "away_team_id": matchup.away_team.team_id if matchup.away_team else None,
+                    "away_team": matchup.away_team.team_name if matchup.away_team else "BYE",
+                    "away_team_owner_name": get_owner_name(matchup.away_team) if matchup.away_team else None,
+                    "away_score": matchup.away_score if matchup.away_team else 0,
+                    "away_lineup": resolve_lineup(matchup.away_lineup) if matchup.away_team else [],
+                    "winner": "HOME" if matchup.home_score > matchup.away_score else "AWAY" if matchup.away_score > matchup.home_score else "TIE"
+                })
+
+            return str(matchup_info)
+        except Exception as e:
+            log_error(f"Error retrieving matchup information: {str(e)}")
+            traceback.print_exc(file=sys.stderr)
+            if "401" in str(e) or "Private" in str(e):
+                return ("This appears to be a private league. Please use the authenticate tool first with your "
+                      "ESPN_S2 and SWID cookies to access private leagues.")
+            return f"Error retrieving matchup information: {str(e)}"
+
 
     @mcp.tool()
     async def logout() -> str:
