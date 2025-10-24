@@ -1,12 +1,14 @@
 # ESPN Fantasy Football MCP Server
 
-## Overview
-
-This MCP (Model Context Protocol) server allows LLMs like Claude to interact with the ESPN Fantasy Football API. It provides tools for accessing league data, team rosters, player statistics, and more through a standardized interface. It can work with both public and private ESPN Leagues.
+### Note on this fork
 
 This fork has been adapted from the original repo and tailored to fit my specific needs. Specifically, I added a new tool `get_detailed_matchup_info` which returns detailed info for a single matchup so that I can ask my AI agent, "Give me a summary of the week 6 matchup between team ID 3 and team ID 7" and it will have access to those teams' lineups and each player's stats for that week. I also added a way to search for a specific team by its ID, team name, or owner name so that I can say, "Tell me John Doe's record so far this season" or "How did Blue Team do last week?"
 
 I also added a check to pull the authentication information automatically from a file called `.venv/secrets.json` (which is git-ignored) so I don't have to copy/paste the auth info every single time I restart the server.
+
+## Overview
+
+This MCP (Model Context Protocol) server allows LLMs like Claude to interact with the ESPN Fantasy Football API. It provides tools for accessing league data, team rosters, player statistics, and more through a standardized interface. It can work with both public and private ESPN Leagues.
 
 ## Features (MCP Tools)
 
