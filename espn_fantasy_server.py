@@ -362,16 +362,19 @@ try:
         
         Args:
             league_id: The ESPN fantasy football league ID
-            week: The week number (if None, uses current week)
+            week: The week number (if None, uses previous week)
             year: Optional year for historical data (defaults to current season)
         """
         try:
-            log_error(f"Getting matchup info for league {league_id}, week {week}, year {year}")
             # Get league using stored credentials
             league = api.get_league(SESSION_ID, league_id, year)
             
             if week is None:
-                week = league.current_week
+                prev_week = league.current_week - 1
+                print(f"No week provided, using previous week (Week {prev_week})")
+                week = prev_week
+
+            log_error(f"Getting matchup info for league {league_id}, week {week}, year {year}")
                 
             if week < 1 or week > 17:  # Most leagues have 17 weeks max
                 return f"Invalid week number. Must be between 1 and 17"
@@ -407,7 +410,7 @@ try:
 
         Args:
             league_id: The ESPN fantasy football league ID
-            competitors: List of team names or IDs to filter matchups by (if multiple provided, will include all matchups with at least one of the teams)
+            competitors: List of team names, owner names, or IDs to filter matchups by (if multiple provided, will include all matchups with at least one of the teams)
             week: The week number (if None, uses current week)
             year: Optional year for historical data (defaults to current season)
         """
@@ -439,9 +442,13 @@ try:
                                 found = matchup
                                 break
                         else:
-                            if matchup.home_team.team_name.lower() == competitor.lower() or (matchup.away_team and matchup.away_team.team_name.lower() == competitor.lower()):
+                            search_term = competitor.lower()
+                            home = f"{matchup.home_team.team_name} ({get_owner_name(matchup.home_team)})".lower()
+                            away = f"{matchup.away_team.team_name} ({get_owner_name(matchup.away_team)})".lower() if matchup.away_team else "BYE"
+                            if search_term in home or search_term in away:
                                 found = matchup
                                 break
+
                     return found
                 
                 for c in competitors:

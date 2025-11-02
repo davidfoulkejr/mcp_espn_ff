@@ -4,7 +4,7 @@ import ast
 import pprint
 import sys
 import time
-from espn_fantasy_server import mcp, get_credentials
+from espn_fantasy_server import mcp, get_credentials, get_owner_name
 from mcp.types import TextContent
 
 SESSION_ID = 'default_session'
@@ -21,8 +21,17 @@ async def main():
         print("No credentials found")
         sys.exit(1)
     league_id = secrets['league_id']
-    matchups = await call_mcp_tool("get_weekly_matchups", {"league_id": league_id, "week": 7, "year": 2025})
-    print(json.dumps(matchups))
+    # [matchup] = await call_mcp_tool("get_detailed_matchup_info", {"league_id": league_id, "year": 2025, "competitors": ["David", "Stephen"]})
+    # print(f"{matchup['home_team_owner_name']}'s lineup:")
+    # for player in matchup['home_lineup']:
+    #     print(f'{player['lineupSlot']} {player['name']}: {player['weekly_stats']['points'] if 'points' in player['weekly_stats'] else 0}')
+
+    # print(f"{matchup['away_team_owner_name']}'s lineup:")
+    # for player in matchup['away_lineup']:
+    #     print(f'{player['lineupSlot']} {player['name']}: {player['weekly_stats']['points'] if 'points' in player['weekly_stats'] else 0}')
+    standings = await call_mcp_tool("get_league_standings", {"league_id": league_id})
+    for team in standings:
+        print(f"{team['owner'][0]['firstName']}: {team['wins']}-{team['losses']}")
 
 if __name__ == "__main__":
     asyncio.run(main())
