@@ -188,6 +188,7 @@ try:
                     "name": player.name,
                     "position": player.position,
                     "proTeam": player.proTeam,
+                    "injuryStatus": player.injuryStatus,
                     **({"season_total_points": player.total_points} if player.total_points else {}),
                     **({"projected_season_total_points": player.projected_total_points} if player.projected_total_points else {}),
                     "season_stats": season_stats,
@@ -371,7 +372,7 @@ try:
             
             if week is None:
                 prev_week = league.current_week - 1
-                print(f"No week provided, using previous week (Week {prev_week})")
+                log_error(f"No week provided, using previous week (Week {prev_week})")
                 week = prev_week
 
             log_error(f"Getting matchup info for league {league_id}, week {week}, year {year}")
@@ -415,7 +416,7 @@ try:
             year: Optional year for historical data (defaults to current season)
         """
         try:
-            print(f"Getting matchup info for league {league_id}, week {week}, year {year}", file=sys.stderr)
+            log_error(f"Getting matchup info for league {league_id}, week {week}, year {year}")
             # Get league using stored credentials
             league = api.get_league(SESSION_ID, league_id, year)
             
@@ -483,6 +484,7 @@ try:
                         "name": player.name,
                         "position": player.position,
                         "proTeam": player.proTeam,
+                        "injuryStatus": player.injuryStatus,
                         **({"season_total_points": player.total_points} if player.total_points else {}),
                         **({"projected_season_total_points": player.projected_total_points} if player.projected_total_points else {}),
                         "lineupSlot": player.lineupSlot,
