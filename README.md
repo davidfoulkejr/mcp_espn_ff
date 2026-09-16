@@ -102,3 +102,5 @@ Once connected, you can ask Claude:
 
 [cwendt94/espn-api](https://github.com/cwendt94/espn-api) for the nifty python wrapper around the ESPN Fantasy API
 
+
+<!-- Azure deployment fix: corrected federated credential issuer -->
