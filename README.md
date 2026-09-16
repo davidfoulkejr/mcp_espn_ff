@@ -104,3 +104,5 @@ Once connected, you can ask Claude:
 
 
 <!-- Azure deployment fix: corrected federated credential issuer -->
+
+<!-- Fixed: Added subscription-level RBAC role assignment -->
