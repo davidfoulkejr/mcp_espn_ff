@@ -1,2 +1,2 @@
 espn-api>=0.44.1
-mcp[cli]>=1.5.0
+mcp[cli]==1.30.0

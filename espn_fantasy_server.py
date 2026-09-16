@@ -1,5 +1,8 @@
 from mcp.server.fastmcp import FastMCP
+from mcp.server.auth.provider import AccessToken, TokenVerifier
+from mcp.server.auth.settings import AuthSettings
 from espn_api.football import League, Team
+from starlette.responses import JSONResponse
 import json
 import signal
 import sys
@@ -7,6 +10,7 @@ import datetime
 import logging
 import traceback
 import os
+import hmac
 
 
 def handle_shutdown(signum, frame):
@@ -22,33 +26,71 @@ def log_error(message):
     print(message, file=sys.stderr)
 
 def get_credentials():
-    """Get ESPN credentials from environment variables or fallback to secrets.json."""
-    # Check environment variables first (for hosted deployments)
+    """Get ESPN credentials from environment variables."""
     espn_s2 = os.environ.get('ESPN_S2')
     swid = os.environ.get('ESPN_SWID')
     
     if espn_s2 and swid:
         return {'espn_s2': espn_s2, 'swid': swid}
-    
-    # Fallback to local secrets.json for development
-    try:
-        with open('./.venv/secrets.json', 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        log_error("Warning: ESPN credentials not found in environment or .venv/secrets.json. Public leagues will work, private leagues will require the authenticate tool.")
-        return None
+
+    log_error("Warning: ESPN_S2 and ESPN_SWID are not configured. Private leagues will be unavailable.")
+    return None
     
 def get_owner_name(team) -> str|None:
     return f"{team.owners[0]['firstName']} {team.owners[0]['lastName']}" if team.owners else None
 
+
+class StaticTokenVerifier(TokenVerifier):
+    def __init__(self, expected_token: str):
+        self.expected_token = expected_token
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        if not hmac.compare_digest(token, self.expected_token):
+            return None
+
+        return AccessToken(
+            token=token,
+            client_id="claude-custom-connector",
+            scopes=[],
+        )
+
+
 try:
+    port = int(os.environ.get("PORT", os.environ.get("WEBSITES_PORT", 8000)))
+    auth_token = os.environ.get("MCP_AUTH_TOKEN")
+    if not auth_token:
+        raise RuntimeError("MCP_AUTH_TOKEN environment variable is required")
+
+    hostname = os.environ.get("WEBSITE_HOSTNAME")
+    server_url = f"https://{hostname}" if hostname else f"http://localhost:{port}"
+
     # Initialize FastMCP server with HTTP transport
     log_error("Initializing FastMCP server...")
-    mcp = FastMCP("espn-fantasy-football", dependencies=['espn-api'])
-    
-    # Enable stateless HTTP mode for Azure deployment
-    mcp.stateless_http = True
-    mcp.json_response = True
+    mcp = FastMCP(
+        "espn-fantasy-football",
+        dependencies=["espn-api"],
+        host="0.0.0.0",
+        port=port,
+        streamable_http_path="/mcp",
+        stateless_http=True,
+        json_response=True,
+        token_verifier=StaticTokenVerifier(auth_token),
+        auth=AuthSettings(
+            issuer_url=server_url,
+            resource_server_url=f"{server_url}/mcp",
+            validate_token_resource=False,
+        ),
+    )
+
+    @mcp.custom_route("/", methods=["GET"])
+    async def health_check(_request):
+        return JSONResponse(
+            {
+                "service": "ESPN Fantasy Football MCP Server",
+                "status": "ok",
+                "mcp_endpoint": "/mcp",
+            }
+        )
 
     # Constants
     CURRENT_YEAR = datetime.datetime.now().year
@@ -556,18 +598,14 @@ try:
         # Register signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, handle_shutdown)   # Ctrl+C
         signal.signal(signal.SIGTERM, handle_shutdown)  # Graceful shutdown
-        
-        # Get configuration from environment
-        port = int(os.environ.get("PORT", 8000))
-        auth_token = os.environ.get("MCP_AUTH_TOKEN")
-        
+
         # Log startup info
         log_error(f"Starting MCP server on port {port}")
-        log_error(f"Auth enabled: {bool(auth_token)}")
+        log_error(f"MCP endpoint: {server_url}/mcp")
         
         # Run the server with streamable HTTP transport
-        # This allows Azure App Service to manage the process
-        mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+        # FastMCP handles the ASGI server internally
+        mcp.run(transport="streamable-http")
         
 except Exception as e:
     # Log any exception that might occur during server initialization

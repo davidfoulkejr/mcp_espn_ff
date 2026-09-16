@@ -15,3 +15,10 @@ wheels/
 # Development
 scratch_paper.py
 .python-version
+
+# Local deployment artifacts and downloaded Azure logs
+deploy.zip
+applog.zip
+applog/
+webapp_logs.zip
+webapp_logs*/
