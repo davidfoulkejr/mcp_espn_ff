@@ -1,11 +1,17 @@
 from mcp.server.fastmcp import FastMCP
 from espn_api.football import League, Team
 import json
-import os
+import signal
 import sys
 import datetime
 import logging
 import traceback
+import os
+
+
+def handle_shutdown(signum, frame):
+    log_error("Shutdown signal received, exiting gracefully...")
+    sys.exit(0)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -16,20 +22,33 @@ def log_error(message):
     print(message, file=sys.stderr)
 
 def get_credentials():
+    """Get ESPN credentials from environment variables or fallback to secrets.json."""
+    # Check environment variables first (for hosted deployments)
+    espn_s2 = os.environ.get('ESPN_S2')
+    swid = os.environ.get('ESPN_SWID')
+    
+    if espn_s2 and swid:
+        return {'espn_s2': espn_s2, 'swid': swid}
+    
+    # Fallback to local secrets.json for development
     try:
         with open('./.venv/secrets.json', 'r') as f:
             return json.load(f)
     except FileNotFoundError:
-        log_error("Error: secrets.json file not found. Please create a secrets.json file in the .venv directory with your ESPN_S2 and SWID cookies in order to authenticate automatically.")
+        log_error("Warning: ESPN credentials not found in environment or .venv/secrets.json. Public leagues will work, private leagues will require the authenticate tool.")
         return None
     
 def get_owner_name(team) -> str|None:
     return f"{team.owners[0]['firstName']} {team.owners[0]['lastName']}" if team.owners else None
 
 try:
-    # Initialize FastMCP server
+    # Initialize FastMCP server with HTTP transport
     log_error("Initializing FastMCP server...")
     mcp = FastMCP("espn-fantasy-football", dependencies=['espn-api'])
+    
+    # Enable stateless HTTP mode for Azure deployment
+    mcp.stateless_http = True
+    mcp.json_response = True
 
     # Constants
     CURRENT_YEAR = datetime.datetime.now().year
@@ -532,17 +551,27 @@ try:
             traceback.print_exc(file=sys.stderr)
             return f"Error logging out: {str(e)}"
 
+
     if __name__ == "__main__":
-        # Run the server
-        log_error("Starting MCP server...")
-        mcp.run()
+        # Register signal handlers for graceful shutdown
+        signal.signal(signal.SIGINT, handle_shutdown)   # Ctrl+C
+        signal.signal(signal.SIGTERM, handle_shutdown)  # Graceful shutdown
+        
+        # Get configuration from environment
+        port = int(os.environ.get("PORT", 8000))
+        auth_token = os.environ.get("MCP_AUTH_TOKEN")
+        
+        # Log startup info
+        log_error(f"Starting MCP server on port {port}")
+        log_error(f"Auth enabled: {bool(auth_token)}")
+        
+        # Run the server with streamable HTTP transport
+        # This allows Azure App Service to manage the process
+        mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+        
 except Exception as e:
     # Log any exception that might occur during server initialization
     log_error(f"ERROR DURING SERVER INITIALIZATION: {str(e)}")
     traceback.print_exc(file=sys.stderr)
-    # Keep the process running to see logs
-    log_error("Server failed to start, but kept running for logging. Press Ctrl+C to exit.")
-    # Wait indefinitely to keep the process alive for logs
-    import time
-    while True:
-        time.sleep(10)
+    log_error("Server failed to start. Exiting.")
+    sys.exit(1)

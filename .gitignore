@@ -9,5 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
-# Other
+# Secrets (never commit)
+.venv/secrets.json
+
+# Development
 scratch_paper.py
+.python-version
