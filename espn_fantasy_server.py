@@ -1,6 +1,4 @@
 from mcp.server.fastmcp import FastMCP
-from mcp.server.auth.provider import AccessToken, TokenVerifier
-from mcp.server.auth.settings import AuthSettings
 from espn_api.football import League, Team
 from starlette.responses import JSONResponse
 import json
@@ -10,7 +8,6 @@ import datetime
 import logging
 import traceback
 import os
-import hmac
 
 
 def handle_shutdown(signum, frame):
@@ -20,6 +17,7 @@ def handle_shutdown(signum, frame):
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("espn-fantasy-football")
+logging.getLogger("uvicorn.access").disabled = True
 
 # Add stderr logging for Claude Desktop to see
 def log_error(message):
@@ -40,29 +38,15 @@ def get_owner_name(team) -> str|None:
     return f"{team.owners[0]['firstName']} {team.owners[0]['lastName']}" if team.owners else None
 
 
-class StaticTokenVerifier(TokenVerifier):
-    def __init__(self, expected_token: str):
-        self.expected_token = expected_token
-
-    async def verify_token(self, token: str) -> AccessToken | None:
-        if not hmac.compare_digest(token, self.expected_token):
-            return None
-
-        return AccessToken(
-            token=token,
-            client_id="claude-custom-connector",
-            scopes=[],
-        )
-
-
 try:
     port = int(os.environ.get("PORT", os.environ.get("WEBSITES_PORT", 8000)))
-    auth_token = os.environ.get("MCP_AUTH_TOKEN")
-    if not auth_token:
-        raise RuntimeError("MCP_AUTH_TOKEN environment variable is required")
+    route_token = os.environ.get("MCP_ROUTE_TOKEN")
+    if not route_token:
+        raise RuntimeError("MCP_ROUTE_TOKEN environment variable is required")
 
     hostname = os.environ.get("WEBSITE_HOSTNAME")
     server_url = f"https://{hostname}" if hostname else f"http://localhost:{port}"
+    mcp_path = f"/mcp/{route_token}"
 
     # Initialize FastMCP server with HTTP transport
     log_error("Initializing FastMCP server...")
@@ -71,15 +55,9 @@ try:
         dependencies=["espn-api"],
         host="0.0.0.0",
         port=port,
-        streamable_http_path="/mcp",
+        streamable_http_path=mcp_path,
         stateless_http=True,
         json_response=True,
-        token_verifier=StaticTokenVerifier(auth_token),
-        auth=AuthSettings(
-            issuer_url=server_url,
-            resource_server_url=f"{server_url}/mcp",
-            validate_token_resource=False,
-        ),
     )
 
     @mcp.custom_route("/", methods=["GET"])
@@ -88,7 +66,6 @@ try:
             {
                 "service": "ESPN Fantasy Football MCP Server",
                 "status": "ok",
-                "mcp_endpoint": "/mcp",
             }
         )
 
@@ -601,7 +578,7 @@ try:
 
         # Log startup info
         log_error(f"Starting MCP server on port {port}")
-        log_error(f"MCP endpoint: {server_url}/mcp")
+        log_error(f"MCP endpoint configured under {server_url}/mcp/<secret>")
         
         # Run the server with streamable HTTP transport
         # FastMCP handles the ASGI server internally
